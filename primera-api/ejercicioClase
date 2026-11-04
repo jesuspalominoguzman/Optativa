@@ -1,0 +1,107 @@
+import http from 'node:http';
+import { json } from 'node:stream/consumers';
+import { usuarios } from './usuarios.js'; 
+
+const error = { error: 'Not Found', message: 'La ruta solicitada no existe en este servidor'};
+
+const DESIRED_PORT = 3000;
+
+const server = http.createServer(async (req, res) => {
+    const { url, method } = req;
+
+    console.log('Petición recibida');
+    
+    const { pathname, searchParams } = new URL(req.url, `http://${req.headers.host}`);
+    
+    console.log(req.headers.host); // localhost:3000
+    console.log(pathname); // /usuarios
+    console.log(searchParams); // clave -> valor
+    console.log(url); // /usuarios?nombre=Javier...
+    
+    const nombre = searchParams.get('nombre');
+
+    // Novedad: Obtenemos los strings de limit y offset
+    const limitParam = searchParams.get('limit');
+    const offsetParam = searchParams.get('offset');
+
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+
+    switch (pathname) {
+        case "/":
+            // Como devuelves HTML aquí, lo ideal es ajustar el content-type
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.statusCode = 200;
+            res.end('<h1>Bienvenido a la página de Home</h1>');
+            break;
+            
+        case "/usuarios":
+            if (method === "GET") {
+                res.statusCode = 200;
+                
+                // Empezamos con todos los usuarios
+                let resultado = usuarios;
+
+                // 1. Filtrado por nombre (si existe)
+                if (nombre) {
+                    resultado = resultado.filter(u => u.nombre === nombre);
+                }
+
+                // 2. Convertir y validar limit y offset
+                // Usamos valores por defecto si no existen (undefined para limit, 0 para offset)
+                let limit = limitParam ? Number(limitParam) : undefined;
+                let offset = offsetParam ? Number(offsetParam) : 0;
+
+                // Validamos que no sean NaN (por si el usuario manda "?limit=letras")
+                if (Number.isNaN(limit)) limit = undefined; // Ignoramos el límite si es inválido
+                if (Number.isNaN(offset)) offset = 0;       // Empezamos desde 0 si el offset es inválido
+
+                // 3. Aplicar paginación con slice
+                if (limit !== undefined) {
+                    // Si hay limit, devolvemos el bloque exacto
+                    resultado = resultado.slice(offset, offset + limit);
+                } else if (offset > 0) {
+                    // Si mandaron offset pero no limit, saltamos los primeros y devolvemos el resto
+                    resultado = resultado.slice(offset);
+                }
+
+                // Devolver el resultado final transformado
+                res.end(JSON.stringify(resultado));
+
+            } else if (method === "POST") {
+                try {
+                    const body = await json(req); // Lee el stream y lo convierte a objeto JSON
+                    
+                    const nuevoUsuario = {
+                        id: usuarios.length + 1,
+                        nombre: body.nombre,
+                        edad: body.edad,
+                        altura: body.altura
+                    };
+
+                    // Insertamos el usuario en el array
+                    usuarios.push(nuevoUsuario);
+
+                    // Respondemos con estado 201 (Creado) y devolvemos el usuario nuevo
+                    res.statusCode = 201;
+                    res.end(JSON.stringify(nuevoUsuario));
+                } catch (error) {
+                    res.statusCode = 400;
+                    return res.end(JSON.stringify({ error: 'Invalid JSON' }));
+                }
+            } else {
+                res.statusCode = 405;
+                res.end(JSON.stringify({ error: 'Method Not Allowed' }));
+            }
+            break;
+            
+        default:
+            res.statusCode = 404;
+            res.end(JSON.stringify(error));
+    }
+
+    return;
+});
+
+server.listen(DESIRED_PORT, () => {
+    console.log(`Servidor escuchando en el puerto http://localhost:${DESIRED_PORT}`)
+});
